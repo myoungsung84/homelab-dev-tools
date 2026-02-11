@@ -10,10 +10,8 @@ import { fileURLToPath } from 'node:url'
 const __filename = fileURLToPath(import.meta.url)
 const SCRIPT_DIR = path.dirname(__filename)
 
-// homelab-dev-tools root (this file is expected to be in: <root>/git-tools/)
+// this file is expected to be in: <tools_root>/git-tools/commit.mjs
 const TOOLS_ROOT = path.resolve(SCRIPT_DIR, '..')
-
-// generator path (dev-tools internal)
 const GEN_SCRIPT = path.join(TOOLS_ROOT, 'git-tools', 'generate-commit.sh')
 
 // git commands should run in the user's current repo
@@ -41,14 +39,15 @@ function die(msg, code = 1) {
 /**
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ cwd?: string, input?: string }} [opts]
+ * @param {{ cwd?: string, input?: string, env?: NodeJS.ProcessEnv }} [opts]
  * @returns {CmdResult}
  */
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd ?? WORK_CWD,
     encoding: 'utf8',
-    input: opts.input
+    input: opts.input,
+    env: opts.env ?? process.env
   })
 
   return {
@@ -62,7 +61,7 @@ function run(cmd, args, opts = {}) {
  * @returns {boolean}
  */
 function isGitRepo() {
-  const r = run('git', ['rev-parse', '--is-inside-work-tree'])
+  const r = run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: WORK_CWD })
   return r.status === 0 && r.stdout.trim() === 'true'
 }
 
@@ -70,7 +69,8 @@ function isGitRepo() {
  * @returns {boolean}
  */
 function hasStagedChanges() {
-  const r = run('git', ['diff', '--staged', '--quiet'])
+  // git diff --staged --quiet returns 1 when there are staged changes
+  const r = run('git', ['diff', '--staged', '--quiet'], { cwd: WORK_CWD })
   return r.status !== 0
 }
 
@@ -78,7 +78,7 @@ function hasStagedChanges() {
  * @returns {string[]}
  */
 function getStagedFiles() {
-  const r = run('git', ['diff', '--cached', '--name-only', '-z'])
+  const r = run('git', ['diff', '--cached', '--name-only', '-z'], { cwd: WORK_CWD })
   if (r.status !== 0) die(`${EMOJI.err} failed to list staged files\n${r.stderr || r.stdout}`)
   return (r.stdout || '').split('\0').filter(Boolean)
 }
@@ -110,7 +110,8 @@ function isForbiddenPath(p) {
     /\.log$/i,
     /\.log\./i,
     /\.pid$/i,
-    /\.lcov$/i
+    /\.lcov$/i,
+    /^llm\/models\/.+\.(gguf|bin|safetensors)$/i
   ]
   return forbidden.some((re) => re.test(p))
 }
@@ -121,9 +122,7 @@ function isForbiddenPath(p) {
  */
 async function prompt(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-  const ans = await new Promise((resolve) => {
-    rl.question(question, (value) => resolve(value))
-  })
+  const ans = await new Promise((resolve) => rl.question(question, (value) => resolve(value)))
   rl.close()
   return String(ans ?? '').trim()
 }
@@ -147,16 +146,7 @@ async function selectCommitType() {
   const n = a ? Number(a) : 4
 
   /** @type {Record<number, string>} */
-  const map = {
-    1: 'fix',
-    2: 'feat',
-    3: 'refactor',
-    4: 'chore',
-    5: 'docs',
-    6: 'test',
-    7: 'perf'
-  }
-
+  const map = { 1: 'fix', 2: 'feat', 3: 'refactor', 4: 'chore', 5: 'docs', 6: 'test', 7: 'perf' }
   const t = map[n]
   if (!t) die(`${EMOJI.err} invalid choice: ${a || '?'}`)
 
@@ -170,7 +160,6 @@ async function selectCommitType() {
 async function handleForbiddenFiles() {
   const staged = getStagedFiles()
   const forbidden = staged.filter(isForbiddenPath)
-
   if (forbidden.length === 0) return
 
   console.log(`${EMOJI.warn} Forbidden staged files detected (should NOT be committed):`)
@@ -188,9 +177,10 @@ async function handleForbiddenFiles() {
   if (act !== 2) die(`${EMOJI.err} invalid action: ${a}`)
 
   for (const f of forbidden) {
-    let r = run('git', ['restore', '--staged', '--', f])
+    // prefer restore --staged, fallback to reset
+    let r = run('git', ['restore', '--staged', '--', f], { cwd: WORK_CWD })
     if (r.status !== 0) {
-      r = run('git', ['reset', '-q', 'HEAD', '--', f])
+      r = run('git', ['reset', '-q', 'HEAD', '--', f], { cwd: WORK_CWD })
       if (r.status !== 0) die(`${EMOJI.err} failed to unstage: ${f}\n${r.stderr || r.stdout}`)
     }
   }
@@ -219,7 +209,6 @@ function extractCommitMessage(genOut) {
     }
   }
   if (end < 0) return ''
-
   return lines.slice(start + 1, end).join('\n').trim()
 }
 
@@ -250,12 +239,23 @@ function applyType(commitType, msg) {
 }
 
 /**
+ * Generator must:
+ * - run git commands in WORK_CWD repo
+ * - still be able to access prompts from TOOLS_ROOT
+ * We pass HOMELAB_TOOLS_ROOT and run it with cwd=WORK_CWD.
+ *
  * @returns {CmdResult}
  */
 function runGenerator() {
-  const isWin = process.platform === 'win32'
-  if (isWin) return run('bash', [GEN_SCRIPT], { cwd: TOOLS_ROOT })
-  return run(GEN_SCRIPT, [], { cwd: TOOLS_ROOT })
+  if (!fs.existsSync(GEN_SCRIPT)) die(`${EMOJI.err} generator not found: ${GEN_SCRIPT}`)
+
+  const env = {
+    ...process.env,
+    HOMELAB_TOOLS_ROOT: TOOLS_ROOT
+  }
+
+  // Use bash everywhere for consistent behavior
+  return run('bash', [GEN_SCRIPT], { cwd: WORK_CWD, env })
 }
 
 /**
@@ -263,7 +263,7 @@ function runGenerator() {
  * @returns {CmdResult}
  */
 function gitCommit(message) {
-  return run('git', ['commit', '--file=-'], { input: message })
+  return run('git', ['commit', '--file=-'], { cwd: WORK_CWD, input: message })
 }
 
 /**
@@ -301,7 +301,6 @@ async function main() {
     process.exit(130)
   })
 
-  if (!fs.existsSync(GEN_SCRIPT)) die(`${EMOJI.err} generator not found: ${GEN_SCRIPT}`)
   if (!isGitRepo()) die(`${EMOJI.err} Not inside a git repository.`)
   if (!hasStagedChanges()) die(`${EMOJI.err} No staged changes.\nTIP: git add -A`)
 
@@ -309,7 +308,8 @@ async function main() {
   await handleForbiddenFiles()
 
   console.log(`${EMOJI.run} Running generator:`)
-  console.log(`  ${GEN_SCRIPT}\n`)
+  console.log(`  ${GEN_SCRIPT}`)
+  console.log(`  (repo: ${WORK_CWD})\n`)
 
   const r = runGenerator()
   if (r.status !== 0) {
@@ -352,7 +352,7 @@ async function main() {
 
   console.log(`${EMOJI.ok} committed: ${subject}`)
 
-  const status = run('git', ['status', '-sb'])
+  const status = run('git', ['status', '-sb'], { cwd: WORK_CWD })
   if (status.status === 0) {
     const line = status.stdout.split(/\r?\n/).find((l) => l.trim().length > 0)
     if (line) console.log(line.trim())

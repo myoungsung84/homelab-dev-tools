@@ -76,6 +76,22 @@ TOOLS_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 PROMPTS_DIR="${HDT_PROMPTS_DIR:-$TOOLS_ROOT/prompts}"
 
 # -------------------------
+# IMPORTANT: Always operate on the caller's git repo
+# - If HOMELAB_REPO_ROOT is provided (from wrapper), use it.
+# - Else, detect repo root from current working directory.
+# -------------------------
+REPO_ROOT="${HOMELAB_REPO_ROOT:-}"
+if [ -z "$REPO_ROOT" ]; then
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+fi
+if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/.git" ] && [ ! -f "$REPO_ROOT/.git" ]; then
+  echo "ERROR: Not inside a git repository."
+  echo "TIP: run this inside a repo (or set HOMELAB_REPO_ROOT)."
+  exit 1
+fi
+cd "$REPO_ROOT"
+
+# -------------------------
 # Config
 # -------------------------
 BASE_URL="${LLM_BASE_URL:-http://localhost:18080}"
@@ -117,24 +133,6 @@ done
 # -------------------------
 # Helpers
 # -------------------------
-sh_or_empty() {
-  if out="$(bash -lc "$1" 2>/dev/null)"; then
-    printf '%s' "$out"
-  else
-    printf '%s' ""
-  fi
-}
-
-repo_root() {
-  local root
-  root="$(sh_or_empty 'git rev-parse --show-toplevel')"
-  if [ -n "$root" ]; then
-    printf '%s' "$root"
-  else
-    pwd
-  fi
-}
-
 # Force UTF-8 cleanup (drop invalid bytes).
 normalize_utf8() {
   if command -v iconv >/dev/null 2>&1; then
@@ -210,7 +208,7 @@ sanitize_commit_message() {
 # Untracked list only (paths)
 get_untracked_files() {
   local porcelain raw_list
-  porcelain="$(sh_or_empty 'git status --porcelain')"
+  porcelain="$(git status --porcelain 2>/dev/null || true)"
   [ -n "$porcelain" ] || { printf '%s' ""; return; }
 
   raw_list="$(printf '%s\n' "$porcelain" \
@@ -220,7 +218,6 @@ get_untracked_files() {
 
   [ -n "$raw_list" ] || { printf '%s' ""; return; }
 
-  # Normalize slashes
   printf '%s\n' "$raw_list" | sed 's|\\|/|g'
 }
 
@@ -239,10 +236,9 @@ format_untracked_section() {
 build_diff_bundle() {
   # STAGED ONLY
   local stat_staged status main_diff
-
-  stat_staged="$(sh_or_empty 'git diff --staged --stat')"
-  status="$(sh_or_empty 'git status --porcelain')"
-  main_diff="$(sh_or_empty 'git diff --staged')"
+  stat_staged="$(git diff --staged --stat 2>/dev/null || true)"
+  status="$(git status --porcelain 2>/dev/null || true)"
+  main_diff="$(git diff --staged 2>/dev/null || true)"
 
   local header
   header=$(
@@ -344,7 +340,6 @@ call_llm() {
 # -------------------------
 # Main
 # -------------------------
-REPO_ROOT="$(repo_root)"
 DEFAULT_SYSTEM_PATH="$PROMPTS_DIR/commit.system.txt"
 DEFAULT_USER_PATH="$PROMPTS_DIR/commit.user.txt"
 
@@ -357,7 +352,7 @@ if ! check_health; then
   exit 1
 fi
 
-# Must have staged changes
+# Must have staged changes (we are already cd'ed to repo root)
 if git diff --staged --quiet; then
   echo "ERROR: No staged changes. (staged-only mode)"
   echo "TIP: stage files first: git add -A"
@@ -395,6 +390,11 @@ msg="$(sanitize_commit_message "${raw:-}")"
 if [ -z "$msg" ]; then
   echo "ERROR: Empty response from LLM."
   exit 1
+fi
+
+# If --out is provided: write message only
+if [ -n "$OUT_FILE" ]; then
+  printf '%s\n' "$msg" > "$OUT_FILE"
 fi
 
 # stdout preview (human)

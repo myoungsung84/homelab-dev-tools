@@ -1,7 +1,13 @@
 # homelab-dev-tools
 
 Personal CLI toolkit for homelab workflows.
-Git helpers, local LLM commit assistant, and shell utilities.
+Git helpers, a local LLM commit assistant, and shell utilities.
+
+## Highlights
+
+- One-line install/uninstall
+- Git helpers for commits and PR workflow
+- Local LLM helper for commit messages
 
 ## Contents
 
@@ -10,10 +16,10 @@ Git helpers, local LLM commit assistant, and shell utilities.
   - gpr : PR helper
   - gpm : misc git helper
   - llm : manage local llama.cpp server (up/down/status)
-- git/     : git-related scripts
-- lib/     : shared shell libraries
-- llm/     : docker compose for local LLM server
-- prompts/ : LLM prompts (system/user)
+- git-tools/ : git-related scripts
+- lib/       : shared shell libraries
+- llm/       : docker compose for local LLM server
+- prompts/   : LLM prompts (system/user)
 
 ## Requirements
 
@@ -27,13 +33,7 @@ Git helpers, local LLM commit assistant, and shell utilities.
 ./install.sh
 ```
 
-Installs to:
-
-```
-~/.homelab-dev-tools
-```
-
-The installer appends the following line to your shell rc file:
+Installs to `~/.homelab-dev-tools` and appends the following line to your shell rc file:
 
 ```bash
 [ -f "$HOME/.homelab-dev-tools/lib/env.sh" ] && . "$HOME/.homelab-dev-tools/lib/env.sh"
@@ -51,11 +51,12 @@ Removes:
 - ~/.homelab-dev-tools
 - rc entries referencing homelab-dev-tools
 
-## Usage (quick)
+## Quickstart
 
 ```bash
 which llm
 llm up
+gc
 ```
 
 ## Repo layout
