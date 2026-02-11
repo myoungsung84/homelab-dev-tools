@@ -1,0 +1,43 @@
+name: llm
+
+services:
+  llama-cpu:
+    profiles: ["cpu"]
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: llm-cpu
+    ports:
+      - "${LLM_PORT:-18080}:${LLM_PORT:-18080}"
+    volumes:
+      - ./models:/models:ro
+    command:
+      - -m
+      - /models/${MODEL_FILE}
+      - -c
+      - "8192"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "${LLM_PORT:-18080}"
+
+  llama-gpu:
+    profiles: ["gpu"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: llm-gpu
+    ports:
+      - "${LLM_PORT:-18080}:${LLM_PORT:-18080}"
+    volumes:
+      - ./models:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+    command:
+      - -m
+      - /models/${MODEL_FILE}
+      - -c
+      - "8192"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "${LLM_PORT:-18080}"

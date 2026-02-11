@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+LLM_SH="$ROOT/llm/llm.sh"
+
+if [ ! -x "$LLM_SH" ]; then
+  echo "❌ llm.sh not found or not executable: $LLM_SH"
+  exit 1
+fi
+
+exec "$LLM_SH" "$@"
