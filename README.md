@@ -88,4 +88,4 @@ Rotate secrets immediately if committed by mistake.
 
 ## License
 
-Personal / private use.
+MIT License © 2026
