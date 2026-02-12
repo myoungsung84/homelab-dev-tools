@@ -77,8 +77,6 @@ PROMPTS_DIR="${HDT_PROMPTS_DIR:-$TOOLS_ROOT/prompts}"
 
 # -------------------------
 # IMPORTANT: Always operate on the caller's git repo
-# - If HOMELAB_REPO_ROOT is provided (from wrapper), use it.
-# - Else, detect repo root from current working directory.
 # -------------------------
 REPO_ROOT="${HOMELAB_REPO_ROOT:-}"
 if [ -z "$REPO_ROOT" ]; then
@@ -96,7 +94,14 @@ cd "$REPO_ROOT"
 # -------------------------
 BASE_URL="${LLM_BASE_URL:-http://localhost:18080}"
 MODEL="${LLM_MODEL:-}"
+
+# NOTE:
+# - Windows/Docker(8192 ctx) 기준이면 크게 문제 없음.
+# - mac native(ctx 2048 등)에서는 너무 크면 아래 "자동 축소 재시도"로 해결.
 MAX_CHARS="${LLM_DIFF_MAX_CHARS:-12000}"
+
+# Retry when ctx exceeded (mac native 대비)
+MAX_RETRIES="${LLM_MAX_RETRIES:-3}"
 
 # -------------------------
 # Args
@@ -133,7 +138,6 @@ done
 # -------------------------
 # Helpers
 # -------------------------
-# Force UTF-8 cleanup (drop invalid bytes).
 normalize_utf8() {
   if command -v iconv >/dev/null 2>&1; then
     iconv -f UTF-8 -t UTF-8//IGNORE 2>/dev/null || true
@@ -142,13 +146,20 @@ normalize_utf8() {
   fi
 }
 
+# ✅ macOS sed 라벨/루프 이슈 제거: perl로 trim/blank 정리 (윈/리눅/맥 공통)
 read_file_trim() {
   local p="$1"
   [ -f "$p" ] || return 1
+
   cat "$p" \
     | normalize_utf8 \
-    | sed -e 's/\r$//' \
-    | sed -e ':a;/^\n*$/{$d;N;ba}' -e 's/[[:space:]]\+$//' \
+    | perl -0777 -pe '
+        s/\r$//mg;           # drop CR
+        s/[ \t]+$//mg;       # trim trailing spaces each line
+        s/\n{3,}/\n\n/g;     # collapse 3+ newlines to 2
+        s/^\n+//;            # trim leading newlines
+        s/\n+\z/\n/;         # trim trailing newlines, keep one
+      ' \
     || true
 }
 
@@ -205,7 +216,6 @@ sanitize_commit_message() {
   printf '%s' "$text"
 }
 
-# Untracked list only (paths)
 get_untracked_files() {
   local porcelain raw_list
   porcelain="$(git status --porcelain 2>/dev/null || true)"
@@ -234,7 +244,6 @@ format_untracked_section() {
 }
 
 build_diff_bundle() {
-  # STAGED ONLY
   local stat_staged status main_diff
   stat_staged="$(git diff --staged --stat 2>/dev/null || true)"
   status="$(git status --porcelain 2>/dev/null || true)"
@@ -278,13 +287,19 @@ check_health() {
   return 0
 }
 
+# globals for error handling
+LLM_ERR_HTTP=""
+LLM_ERR_BODY=""
+
 call_llm() {
   local system="$1"
   local user="$2"
 
-  local payload tmp_json tmp_utf8 resp http_code body
+  local payload tmp_json tmp_utf8 tmp_body tmp_err http_code body
   tmp_json="$(mktemp -t llm-payload.XXXXXX.json)"
   tmp_utf8="$(mktemp -t llm-payload.XXXXXX.utf8.json)"
+  tmp_body="$(mktemp -t llm-body.XXXXXX.json)"
+  tmp_err="$(mktemp -t llm-err.XXXXXX.log)"
 
   payload="$(
     jq -n \
@@ -315,26 +330,60 @@ call_llm() {
     LC_ALL=C tr -cd '\11\12\15\40-\176' < "$tmp_json" > "$tmp_utf8" || true
   fi
 
-  resp="$(curl -sS \
-    -w $'\n__HTTP_CODE__:%{http_code}\n' \
-    -H 'content-type: application/json; charset=utf-8' \
-    --data-binary "@$tmp_utf8" \
-    "${BASE_URL}/v1/chat/completions" || true)"
+  # ✅ 가장 안정적인 방식: body는 파일로, http_code는 stdout으로만 받기
+  http_code="$(
+    curl -sS \
+      -o "$tmp_body" \
+      -w '%{http_code}' \
+      -H 'content-type: application/json; charset=utf-8' \
+      --data-binary "@$tmp_utf8" \
+      "${BASE_URL}/v1/chat/completions" \
+      2>"$tmp_err" || true
+  )"
 
-  http_code="$(printf '%s' "$resp" | sed -n 's/^__HTTP_CODE__:\([0-9][0-9][0-9]\)$/\1/p')"
-  body="$(printf '%s' "$resp" | sed '/^__HTTP_CODE__:/d')"
+  body="$(cat "$tmp_body" 2>/dev/null || true)"
 
-  rm -f "$tmp_json" "$tmp_utf8" || true
+  rm -f "$tmp_json" "$tmp_utf8" "$tmp_body" || true
 
-  if [ "${http_code:-}" != "200" ]; then
-    echo "ERROR: LLM request failed (HTTP ${http_code:-unknown})" >&2
+  # curl이 아예 실패하면 http_code가 비거나 000인 경우가 많음
+  http_code="${http_code//$'\r'/}"
+  http_code="$(printf '%s' "$http_code" | tr -d '[:space:]')"
+  if [ -z "${http_code:-}" ]; then
+    http_code="000"
+  fi
+
+  if [ "$http_code" != "200" ]; then
+    echo "ERROR: LLM request failed (HTTP ${http_code})" >&2
     echo "----- LLM ERROR BODY -----" >&2
-    printf '%s\n' "$body" >&2
+    printf '%s\n' "${body:-}" >&2
     echo "--------------------------" >&2
+
+    if [ "$http_code" = "000" ]; then
+      echo "----- CURL ERROR (network/connection) -----" >&2
+      cat "$tmp_err" >&2 || true
+      echo "------------------------------------------" >&2
+      echo "TIP: check server: curl -sS ${BASE_URL}/health" >&2
+    fi
+
+    rm -f "$tmp_err" || true
     return 1
   fi
 
+  rm -f "$tmp_err" || true
   printf '%s' "$body" | jq -r '.choices[0].message.content // empty'
+}
+
+# parse llama.cpp exceed-context error payload (best-effort)
+# returns "n_prompt_tokens n_ctx"
+parse_exceed_ctx() {
+  local body="$1"
+  # body might be json: {"error":{"code":400,"message":"...","type":"exceed_context_size_error","n_prompt_tokens":4742,"n_ctx":2048}}
+  printf '%s' "$body" | jq -r '
+    if (.error.type? // "") == "exceed_context_size_error"
+    then "\(.error.n_prompt_tokens // 0) \(.error.n_ctx // 0)"
+    else ""
+    end
+  ' 2>/dev/null || true
 }
 
 # -------------------------
@@ -352,7 +401,6 @@ if ! check_health; then
   exit 1
 fi
 
-# Must have staged changes (we are already cd'ed to repo root)
 if git diff --staged --quiet; then
   echo "ERROR: No staged changes. (staged-only mode)"
   echo "TIP: stage files first: git add -A"
@@ -381,23 +429,75 @@ if [ -z "$user_tpl" ]; then
   exit 1
 fi
 
-input="$(truncate "$bundle" "$MAX_CHARS")"
-user_prompt="$(apply_template_input "$user_tpl" "$input")"
+# ✅ 자동 축소 재시도 루프 (맥 ctx 2048 같은 경우 대비)
+attempt=1
+cur_max="$MAX_CHARS"
+raw=""
+msg=""
 
-raw="$(call_llm "$system_tpl" "$user_prompt")"
-msg="$(sanitize_commit_message "${raw:-}")"
+while [ "$attempt" -le "$MAX_RETRIES" ]; do
+  input="$(truncate "$bundle" "$cur_max")"
+  user_prompt="$(apply_template_input "$user_tpl" "$input")"
 
-if [ -z "$msg" ]; then
-  echo "ERROR: Empty response from LLM."
+  if raw="$(call_llm "$system_tpl" "$user_prompt")"; then
+    msg="$(sanitize_commit_message "${raw:-}")"
+    break
+  fi
+
+  # 실패 처리
+  http="${LLM_ERR_HTTP:-}"
+  body="${LLM_ERR_BODY:-}"
+
+  # exceed ctx면 자동으로 더 자르고 재시도
+  if [ "$http" = "400" ]; then
+    parsed="$(parse_exceed_ctx "$body")"
+    if [ -n "$parsed" ]; then
+      n_prompt="$(printf '%s' "$parsed" | awk '{print $1}')"
+      n_ctx="$(printf '%s' "$parsed" | awk '{print $2}')"
+
+      if [ "${n_prompt:-0}" -gt 0 ] && [ "${n_ctx:-0}" -gt 0 ]; then
+        # 축소 비율: n_ctx / n_prompt_tokens 에 안전계수 0.85
+        # (char 기반이므로 대충 줄이되, 과감하게 줄여서 한번에 통과시키는 쪽)
+        new_max="$(awk -v m="$cur_max" -v a="$n_prompt" -v c="$n_ctx" '
+          BEGIN{
+            r = (c / a) * 0.85;
+            if (r > 0.95) r = 0.95;
+            if (r < 0.20) r = 0.20;
+            printf("%d", m * r);
+          }')"
+
+        if [ "$new_max" -lt 2000 ]; then
+          new_max=2000
+        fi
+
+        echo "⚠️  LLM context exceeded (prompt=${n_prompt}, ctx=${n_ctx}). Retrying with smaller diff..."
+        echo "   - attempt: ${attempt}/${MAX_RETRIES}"
+        echo "   - max chars: ${cur_max} → ${new_max}"
+        cur_max="$new_max"
+        attempt=$((attempt + 1))
+        continue
+      fi
+    fi
+  fi
+
+  # 그 외 에러는 그대로 출력하고 종료
+  echo "ERROR: LLM request failed (HTTP ${http:-unknown})" >&2
+  echo "----- LLM ERROR BODY -----" >&2
+  printf '%s\n' "$body" >&2
+  echo "--------------------------" >&2
+  exit 1
+done
+
+if [ -z "${msg:-}" ]; then
+  echo "ERROR: Empty response from LLM (or retries exhausted)."
+  echo "TIP: increase ctx on the server OR reduce diff via LLM_DIFF_MAX_CHARS"
   exit 1
 fi
 
-# If --out is provided: write message only
 if [ -n "$OUT_FILE" ]; then
   printf '%s\n' "$msg" > "$OUT_FILE"
 fi
 
-# stdout preview (human)
 echo
 echo "===== COMMIT MESSAGE ====="
 echo

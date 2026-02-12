@@ -23,7 +23,7 @@ const EMOJI = {
   err: '❌',
   run: '▶',
   stop: '⛔',
-  info: 'ℹ️'
+  info: 'ℹ️',
 }
 
 /**
@@ -47,13 +47,13 @@ function run(cmd, args, opts = {}) {
     cwd: opts.cwd ?? WORK_CWD,
     encoding: 'utf8',
     input: opts.input,
-    env: opts.env ?? process.env
+    env: opts.env ?? process.env,
   })
 
   return {
     status: r.status,
     stdout: typeof r.stdout === 'string' ? r.stdout : String(r.stdout ?? ''),
-    stderr: typeof r.stderr === 'string' ? r.stderr : String(r.stderr ?? '')
+    stderr: typeof r.stderr === 'string' ? r.stderr : String(r.stderr ?? ''),
   }
 }
 
@@ -61,7 +61,9 @@ function run(cmd, args, opts = {}) {
  * @returns {boolean}
  */
 function isGitRepo() {
-  const r = run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: WORK_CWD })
+  const r = run('git', ['rev-parse', '--is-inside-work-tree'], {
+    cwd: WORK_CWD,
+  })
   return r.status === 0 && r.stdout.trim() === 'true'
 }
 
@@ -78,8 +80,11 @@ function hasStagedChanges() {
  * @returns {string[]}
  */
 function getStagedFiles() {
-  const r = run('git', ['diff', '--cached', '--name-only', '-z'], { cwd: WORK_CWD })
-  if (r.status !== 0) die(`${EMOJI.err} failed to list staged files\n${r.stderr || r.stdout}`)
+  const r = run('git', ['diff', '--cached', '--name-only', '-z'], {
+    cwd: WORK_CWD,
+  })
+  if (r.status !== 0)
+    die(`${EMOJI.err} failed to list staged files\n${r.stderr || r.stdout}`)
   return (r.stdout || '').split('\0').filter(Boolean)
 }
 
@@ -111,7 +116,7 @@ function isForbiddenPath(p) {
     /\.log\./i,
     /\.pid$/i,
     /\.lcov$/i,
-    /^llm\/models\/.+\.(gguf|bin|safetensors)$/i
+    /^llm\/models\/.+\.(gguf|bin|safetensors)$/i,
   ]
   return forbidden.some((re) => re.test(p))
 }
@@ -121,8 +126,13 @@ function isForbiddenPath(p) {
  * @returns {Promise<string>}
  */
 async function prompt(question) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-  const ans = await new Promise((resolve) => rl.question(question, (value) => resolve(value)))
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
+  const ans = await new Promise((resolve) =>
+    rl.question(question, (value) => resolve(value)),
+  )
   rl.close()
   return String(ans ?? '').trim()
 }
@@ -146,7 +156,15 @@ async function selectCommitType() {
   const n = a ? Number(a) : 4
 
   /** @type {Record<number, string>} */
-  const map = { 1: 'fix', 2: 'feat', 3: 'refactor', 4: 'chore', 5: 'docs', 6: 'test', 7: 'perf' }
+  const map = {
+    1: 'fix',
+    2: 'feat',
+    3: 'refactor',
+    4: 'chore',
+    5: 'docs',
+    6: 'test',
+    7: 'perf',
+  }
   const t = map[n]
   if (!t) die(`${EMOJI.err} invalid choice: ${a || '?'}`)
 
@@ -162,7 +180,9 @@ async function handleForbiddenFiles() {
   const forbidden = staged.filter(isForbiddenPath)
   if (forbidden.length === 0) return
 
-  console.log(`${EMOJI.warn} Forbidden staged files detected (should NOT be committed):`)
+  console.log(
+    `${EMOJI.warn} Forbidden staged files detected (should NOT be committed):`,
+  )
   for (const f of forbidden) console.log(`  - ${f}`)
   console.log('')
   console.log('Choose action:')
@@ -181,14 +201,17 @@ async function handleForbiddenFiles() {
     let r = run('git', ['restore', '--staged', '--', f], { cwd: WORK_CWD })
     if (r.status !== 0) {
       r = run('git', ['reset', '-q', 'HEAD', '--', f], { cwd: WORK_CWD })
-      if (r.status !== 0) die(`${EMOJI.err} failed to unstage: ${f}\n${r.stderr || r.stdout}`)
+      if (r.status !== 0)
+        die(`${EMOJI.err} failed to unstage: ${f}\n${r.stderr || r.stdout}`)
     }
   }
 
   console.log(`${EMOJI.ok} Unstaged forbidden files.\n`)
 
   if (!hasStagedChanges()) {
-    die(`${EMOJI.err} After filtering, no staged changes remain.\nTIP: stage valid files and retry.`)
+    die(
+      `${EMOJI.err} After filtering, no staged changes remain.\nTIP: stage valid files and retry.`,
+    )
   }
 }
 
@@ -198,7 +221,9 @@ async function handleForbiddenFiles() {
  */
 function extractCommitMessage(genOut) {
   const lines = String(genOut ?? '').split(/\r?\n/)
-  const start = lines.findIndex((l) => l.trim() === '===== COMMIT MESSAGE =====')
+  const start = lines.findIndex(
+    (l) => l.trim() === '===== COMMIT MESSAGE =====',
+  )
   if (start < 0) return ''
 
   let end = -1
@@ -209,7 +234,10 @@ function extractCommitMessage(genOut) {
     }
   }
   if (end < 0) return ''
-  return lines.slice(start + 1, end).join('\n').trim()
+  return lines
+    .slice(start + 1, end)
+    .join('\n')
+    .trim()
 }
 
 /**
@@ -221,14 +249,19 @@ function applyType(commitType, msg) {
   const lines = msg.split(/\r?\n/)
   const firstNonEmptyIdx = lines.findIndex((l) => l.trim().length > 0)
 
-  const subject0 = firstNonEmptyIdx >= 0 ? (lines[firstNonEmptyIdx]?.trim() ?? '') : ''
-  const body = firstNonEmptyIdx >= 0 ? lines.slice(firstNonEmptyIdx + 1).join('\n') : ''
+  const subject0 =
+    firstNonEmptyIdx >= 0 ? (lines[firstNonEmptyIdx]?.trim() ?? '') : ''
+  const body =
+    firstNonEmptyIdx >= 0 ? lines.slice(firstNonEmptyIdx + 1).join('\n') : ''
 
   const re = /^(feat|fix|refactor|chore|docs|test|perf)(\([^)]+\))?:\s+.+/
   let subject = subject0
 
   if (re.test(subject0)) {
-    subject = subject0.replace(/^(feat|fix|refactor|chore|docs|test|perf)/, commitType)
+    subject = subject0.replace(
+      /^(feat|fix|refactor|chore|docs|test|perf)/,
+      commitType,
+    )
   } else {
     subject = `${commitType}: ${subject0 || 'update'}`
   }
@@ -236,6 +269,66 @@ function applyType(commitType, msg) {
   const out = [subject]
   if (body.trim().length > 0) out.push('', body.trimEnd())
   return out.join('\n')
+}
+
+/**
+ * Bullet 포맷 강제:
+ * - "-맥OS" -> "- 맥OS"
+ * - "• foo" "* foo" "– foo" "— foo" -> "- foo"
+ * - "-   foo" -> "- foo"
+ * @param {string} fullMsg
+ * @returns {string}
+ */
+function normalizeBulletBody(fullMsg) {
+  const lines = String(fullMsg ?? '').split(/\r?\n/)
+  if (lines.length === 0) return ''
+
+  // subject = 첫 non-empty 라인
+  const subjectIdx = lines.findIndex((l) => l.trim().length > 0)
+  if (subjectIdx < 0) return ''
+
+  const subject = lines[subjectIdx].trim()
+  const rest = lines.slice(subjectIdx + 1)
+
+  const normalized = rest.map((line) => {
+    const s = String(line ?? '')
+
+    // 빈 줄은 그대로
+    if (s.trim().length === 0) return s
+
+    // bullet 후보만 정규화
+    // - / * / • / – / — 등
+    const m = s.match(/^(\s*)([-*•–—])(\s*)(.*)$/)
+    if (!m) return s
+
+    const indent = m[1] ?? ''
+    const content = (m[4] ?? '').trim()
+    if (!content) return '' // bullet인데 내용이 없으면 제거(빈 줄)
+
+    return `${indent}- ${content}`
+  })
+
+  // 연속 빈 줄 과다 줄이기(최대 1줄 유지)
+  const compact = []
+  let prevEmpty = false
+  for (const l of normalized) {
+    const isEmpty = String(l).trim().length === 0
+    if (isEmpty) {
+      if (!prevEmpty) compact.push('')
+      prevEmpty = true
+    } else {
+      compact.push(l)
+      prevEmpty = false
+    }
+  }
+
+  // subject + (바로 아래 공백 1줄만 유지) + body
+  let body = compact.join('\n').trimEnd()
+  if (body.length > 0 && !body.startsWith('\n')) {
+    body = '\n' + body
+  }
+
+  return `${subject}${body}`
 }
 
 /**
@@ -247,11 +340,12 @@ function applyType(commitType, msg) {
  * @returns {CmdResult}
  */
 function runGenerator() {
-  if (!fs.existsSync(GEN_SCRIPT)) die(`${EMOJI.err} generator not found: ${GEN_SCRIPT}`)
+  if (!fs.existsSync(GEN_SCRIPT))
+    die(`${EMOJI.err} generator not found: ${GEN_SCRIPT}`)
 
   const env = {
     ...process.env,
-    HOMELAB_TOOLS_ROOT: TOOLS_ROOT
+    HOMELAB_TOOLS_ROOT: TOOLS_ROOT,
   }
 
   // Use bash everywhere for consistent behavior
@@ -273,7 +367,9 @@ async function confirmCommit() {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const a = await prompt('Commit now? [Y/n]: ')
-    const s = String(a ?? '').trim().toLowerCase()
+    const s = String(a ?? '')
+      .trim()
+      .toLowerCase()
 
     if (!s) return true
     if (s === 'y' || s === 'yes') return true
@@ -302,7 +398,8 @@ async function main() {
   })
 
   if (!isGitRepo()) die(`${EMOJI.err} Not inside a git repository.`)
-  if (!hasStagedChanges()) die(`${EMOJI.err} No staged changes.\nTIP: git add -A`)
+  if (!hasStagedChanges())
+    die(`${EMOJI.err} No staged changes.\nTIP: git add -A`)
 
   const commitType = await selectCommitType()
   await handleForbiddenFiles()
@@ -314,20 +411,27 @@ async function main() {
   const r = runGenerator()
   if (r.status !== 0) {
     die(
-      `${EMOJI.err} Failed to run generator (exit=${r.status ?? 'null'})\n\n----- generator output -----\n${r.stdout || r.stderr
-      }\n---------------------------`
+      `${EMOJI.err} Failed to run generator (exit=${r.status ?? 'null'})\n\n----- generator output -----\n${
+        r.stdout || r.stderr
+      }\n---------------------------`,
     )
   }
 
   const block = extractCommitMessage(r.stdout || '')
   if (!block.trim()) {
     die(
-      `${EMOJI.err} Could not extract commit message from generator output.\n\n----- generator output -----\n${r.stdout || ''
-      }\n---------------------------`
+      `${EMOJI.err} Could not extract commit message from generator output.\n\n----- generator output -----\n${
+        r.stdout || ''
+      }\n---------------------------`,
     )
   }
 
-  const finalMsg = applyType(commitType, block)
+  // 1) enforce commit type prefix
+  let finalMsg = applyType(commitType, block)
+
+  // 2) normalize bullet formatting (fix "-맥OS" etc.)
+  finalMsg = normalizeBulletBody(finalMsg)
+
   const subject = getSubjectLine(finalMsg) || `${commitType}: update`
 
   console.log('\n===== COMMIT MESSAGE (PREVIEW) =====\n')
@@ -345,8 +449,9 @@ async function main() {
 
   if (c.status !== 0) {
     die(
-      `${EMOJI.err} git commit failed (exit=${c.status ?? 'null'})\n\n----- git output -----\n${c.stdout || c.stderr
-      }\n----------------------`
+      `${EMOJI.err} git commit failed (exit=${c.status ?? 'null'})\n\n----- git output -----\n${
+        c.stdout || c.stderr
+      }\n----------------------`,
     )
   }
 
@@ -366,7 +471,7 @@ async function main() {
 function crash(e) {
   const msg =
     e && typeof e === 'object' && 'stack' in e
-      ? String(/** @type {{stack?: unknown}} */(e).stack)
+      ? String(/** @type {{stack?: unknown}} */ (e).stack)
       : String(e)
   die(`${EMOJI.err} ${msg}`, 1)
 }
