@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LLM_DIR="$SCRIPT_DIR"
-TOOLS_ROOT="$(cd -- "$LLM_DIR/.." && pwd)"
 
 ENV_FILE="$LLM_DIR/.env"
 COMPOSE_FILE="$LLM_DIR/compose.yml"
@@ -67,7 +66,16 @@ getv() {
 }
 
 compose() {
-  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+  local project
+  project="$(getv LLM_PROJECT llm)"
+
+  docker compose \
+    -p "$project" \
+    --project-directory "$LLM_DIR" \
+    --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" \
+    --ansi never \
+    "$@"
 }
 
 detect_profile() {
@@ -156,18 +164,39 @@ wait_health() {
   done
 }
 
+list_llm_containers() {
+  docker ps --format '{{.Names}}' | grep -E '^(llm-cpu|llm-gpu)$' || true
+}
+
+force_kill_llm_containers_if_any() {
+  local still
+  still="$(list_llm_containers)"
+  if [ -n "$still" ]; then
+    echo "⚠️  Containers still running after compose down. Forcing stop/rm:"
+    echo "$still" | sed 's/^/ - /'
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      docker rm -f "$name" >/dev/null 2>&1 || true
+    done <<< "$still"
+    echo "🧹 LLM down (forced)"
+  else
+    echo "✅ LLM down"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage: ./llm.sh <command> [options]
 
 Commands:
   up                 Start LLM server (cpu/gpu/auto via LLM_PROFILE)
-  down [--clean]     Stop LLM server (optionally remove orphans)
+  down [--clean]     Stop LLM server (always force-kills llm-cpu/llm-gpu if still running)
   restart            Restart LLM server
   status             Show compose ps
   logs [-f]          Show logs
 
 Env (read from llm/.env, or process env):
+  LLM_PROJECT=llm (optional)
   LLM_PROFILE=cpu|gpu|auto
   LLM_PORT=18080
   MODEL_FILE=...
@@ -203,7 +232,10 @@ case "$CMD" in
     download_model_if_missing
     profile="$(detect_profile)"
 
-    compose down --remove-orphans >/dev/null 2>&1 || true
+    # 전환 시 찌꺼기 방지
+    compose down --remove-orphans || true
+    # ✅ down이 못 치운 게 있으면 자동 force 처리
+    force_kill_llm_containers_if_any >/dev/null 2>&1 || true
 
     echo "🚀 Starting LLM (profile: $profile)"
     compose --profile "$profile" up -d
@@ -221,12 +253,13 @@ case "$CMD" in
     done
 
     if [ "$remove_orphans" -eq 1 ]; then
-      compose down --remove-orphans
-      echo "🧹 LLM down (orphans removed)"
+      compose down --remove-orphans || true
     else
-      compose down
-      echo "✅ LLM down"
+      compose down || true
     fi
+
+    # ✅ 항상 강제 정리까지 수행
+    force_kill_llm_containers_if_any
     ;;
 
   restart)

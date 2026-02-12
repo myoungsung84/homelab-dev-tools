@@ -6,6 +6,7 @@ alias gp='git pull'
 alias gpp='git push'
 alias gs='git status'
 alias gl='git log --oneline --graph --decorate'
+alias gaa='git add --all'
 
 # ============================================================
 # LLM / Git tools (bin/ 에 있는 실행 파일)
@@ -23,6 +24,14 @@ alias lg='lazygit'
 alias cls='clear'
 alias ll='ls -alF'
 alias la='ls -A'
+
+# ============================================================
+# Docker shortcuts
+# ============================================================
+
+alias dps='docker ps'
+alias dpsa='docker ps -a'
+alias dpsf='docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
 
 # ============================================================
 # Functions

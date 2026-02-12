@@ -27,11 +27,10 @@ services:
       - "${LLM_PORT:-18080}:${LLM_PORT:-18080}"
     volumes:
       - ./models:/models:ro
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: ["gpu"]
+
+    # GPU (compose 호환 좋음)
+    gpus: all
+
     command:
       - -m
       - /models/${MODEL_FILE}

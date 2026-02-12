@@ -33,6 +33,7 @@ Git 작업 보조, 로컬 LLM 기반 커밋 메시지 생성, 각종 쉘 유틸�
   - macOS 기본 쉘(zsh) 기준
   - bash 환경은 공식 지원하지 않습니다.
 - tar
+- Node.js 20.x 이상 (LTS)
 
 기능별 의존성 (수동 설치 필요):
 
@@ -56,13 +57,13 @@ irm get.scoop.sh | iex
 Git Bash:
 
 ```bash
-scoop install jq eza
+scoop install jq eza nodejs
 ```
 
 macOS (zsh)
 
 ```bash
-brew install jq eza
+brew install jq eza node
 ```
 
 Linux (예시)
@@ -70,19 +71,19 @@ Linux (예시)
 Debian / Ubuntu
 
 ```bash
-sudo apt install -y jq
+sudo apt install -y jq nodejs npm
 ```
 
 Fedora
 
 ```bash
-sudo dnf install -y jq eza
+sudo dnf install -y jq eza nodejs
 ```
 
 Arch
 
 ```bash
-sudo pacman -S jq eza
+sudo pacman -S jq eza nodejs npm
 ```
 
 ## 설치
