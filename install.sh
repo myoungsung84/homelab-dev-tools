@@ -8,6 +8,9 @@ TARGET="$HOME_DIR/.homelab-dev-tools"
 
 LINE='[ -f "$HOME/.homelab-dev-tools/lib/env.sh" ] && . "$HOME/.homelab-dev-tools/lib/env.sh"'
 
+BACKUP_DIR="$HOME_DIR/llm-model-backup"
+MODEL_DIR_REL="llm/models"
+
 echo "📦 Installing homelab-dev-tools"
 echo " - source : $SRC"
 echo " - target : $TARGET"
@@ -20,6 +23,19 @@ if [ ! -d "$SRC/bin" ] || [ ! -d "$SRC/lib" ] || [ ! -f "$SRC/lib/env.sh" ]; the
   echo "❌ ERROR: invalid source layout (need bin/, lib/, lib/env.sh)"
   ls -al "$SRC" | sed 's/^/  /'
   exit 1
+fi
+
+# ------------------------------------------------------------
+# Backup models (if exists)
+# ------------------------------------------------------------
+if [ -d "$TARGET/$MODEL_DIR_REL" ]; then
+  echo "💾 Backing up models..."
+  rm -rf "$BACKUP_DIR"
+  mkdir -p "$BACKUP_DIR"
+  cp -a "$TARGET/$MODEL_DIR_REL/." "$BACKUP_DIR/" 2>/dev/null || true
+  echo "✅ Model backup: $BACKUP_DIR"
+else
+  echo "ℹ️  No existing models to back up."
 fi
 
 # ------------------------------------------------------------
@@ -44,6 +60,18 @@ if [ ! -f "$TARGET/lib/env.sh" ]; then
   echo "Target listing:"
   ls -al "$TARGET" | sed 's/^/  /'
   exit 1
+fi
+
+# ------------------------------------------------------------
+# Restore models
+# ------------------------------------------------------------
+if [ -d "$BACKUP_DIR" ] && [ "$(ls -A "$BACKUP_DIR" 2>/dev/null || true)" != "" ]; then
+  echo "♻️  Restoring models..."
+  mkdir -p "$TARGET/$MODEL_DIR_REL"
+  cp -a "$BACKUP_DIR/." "$TARGET/$MODEL_DIR_REL/" 2>/dev/null || true
+  echo "✅ Models restored: $TARGET/$MODEL_DIR_REL"
+else
+  echo "ℹ️  No model backup to restore."
 fi
 
 # ------------------------------------------------------------
