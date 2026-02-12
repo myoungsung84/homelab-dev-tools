@@ -13,12 +13,18 @@ echo " - source : $SRC"
 echo " - target : $TARGET"
 echo
 
+# ------------------------------------------------------------
+# Validate source layout
+# ------------------------------------------------------------
 if [ ! -d "$SRC/bin" ] || [ ! -d "$SRC/lib" ] || [ ! -f "$SRC/lib/env.sh" ]; then
   echo "❌ ERROR: invalid source layout (need bin/, lib/, lib/env.sh)"
   ls -al "$SRC" | sed 's/^/  /'
   exit 1
 fi
 
+# ------------------------------------------------------------
+# Clean + copy
+# ------------------------------------------------------------
 echo "🧹 Cleaning target"
 rm -rf "$TARGET"
 mkdir -p "$TARGET"
@@ -29,6 +35,9 @@ echo "📋 Copying (tar pipe)..."
   tar -cf - . | (cd "$TARGET" && tar -xf -)
 )
 
+# ------------------------------------------------------------
+# Verify
+# ------------------------------------------------------------
 echo "🔍 Verifying target..."
 if [ ! -f "$TARGET/lib/env.sh" ]; then
   echo "❌ INSTALL FAILED: missing $TARGET/lib/env.sh"
@@ -37,10 +46,34 @@ if [ ! -f "$TARGET/lib/env.sh" ]; then
   exit 1
 fi
 
+# ------------------------------------------------------------
+# Fix permissions
+# ------------------------------------------------------------
+echo "🔧 Fixing permissions..."
+
+# 1) bin entrypoints (always executable)
+chmod +x "$TARGET/bin/"* 2>/dev/null || true
+
+# 2) all shell scripts (*.sh), excluding heavy / unsafe dirs
+find "$TARGET" -type d \( \
+    -name .git -o \
+    -name node_modules -o \
+    -name dist -o \
+    -name out -o \
+    -name build -o \
+    -name releases \
+  \) -prune -false -o \
+  -type f -name '*.sh' -print0 \
+  | xargs -0 chmod +x 2>/dev/null || true
+
 echo "✅ Installed bin:"
 ls -al "$TARGET/bin" | sed 's/^/  /'
 echo
 
+# ------------------------------------------------------------
+# RC selection
+# - zsh preferred if detected
+# ------------------------------------------------------------
 if echo "${SHELL:-}" | grep -q zsh || [ -f "$HOME_DIR/.zshrc" ]; then
   RC="$HOME_DIR/.zshrc"
 else
@@ -48,6 +81,9 @@ else
 fi
 [ -f "$RC" ] || touch "$RC"
 
+# ------------------------------------------------------------
+# Append loader line once
+# ------------------------------------------------------------
 if grep -q 'homelab-dev-tools/lib/env.sh' "$RC"; then
   echo "🔁 Already configured: $RC"
 else
@@ -56,17 +92,18 @@ else
   echo "$LINE" >> "$RC"
 fi
 
+# ------------------------------------------------------------
+# Finish
+# ------------------------------------------------------------
 echo
 echo "🔄 Reloading: $RC"
-
-if [ -n "${BASH_VERSION:-}" ]; then
-  source "$RC" || true
-fi
-
-hash -r 2>/dev/null || true
+echo "ℹ️ For changes to take effect in this terminal, run:"
+echo "   source \"$RC\""
+echo "   hash -r"
+echo
+echo "✅ After reload, try:"
+echo "   which llm"
+echo "   llm up"
 
 echo
 echo "🎉 Done"
-echo "✅ Try:"
-echo "   which llm"
-echo "   llm up"
