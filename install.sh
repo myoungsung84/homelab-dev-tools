@@ -8,7 +8,8 @@ TARGET="$HOME_DIR/.homelab-dev-tools"
 
 LINE='[ -f "$HOME/.homelab-dev-tools/lib/env.sh" ] && . "$HOME/.homelab-dev-tools/lib/env.sh"'
 
-BACKUP_DIR="$HOME_DIR/llm-model-backup"
+BACKUP_ROOT="$HOME_DIR/llm-model-backup"
+BACKUP_MODELS="$BACKUP_ROOT/models"
 MODEL_DIR_REL="llm/models"
 
 echo "📦 Installing homelab-dev-tools"
@@ -26,14 +27,17 @@ if [ ! -d "$SRC/bin" ] || [ ! -d "$SRC/lib" ] || [ ! -f "$SRC/lib/env.sh" ]; the
 fi
 
 # ------------------------------------------------------------
-# Backup models (if exists)
+# Backup models (if exists) — fast move
 # ------------------------------------------------------------
 if [ -d "$TARGET/$MODEL_DIR_REL" ]; then
-  echo "💾 Backing up models..."
-  rm -rf "$BACKUP_DIR"
-  mkdir -p "$BACKUP_DIR"
-  cp -a "$TARGET/$MODEL_DIR_REL/." "$BACKUP_DIR/" 2>/dev/null || true
-  echo "✅ Model backup: $BACKUP_DIR"
+  echo "💾 Moving models (fast)..."
+
+  rm -rf "$BACKUP_ROOT"
+  mkdir -p "$BACKUP_ROOT"
+
+  mv "$TARGET/$MODEL_DIR_REL" "$BACKUP_MODELS"
+
+  echo "✅ Model moved: $BACKUP_MODELS"
 else
   echo "ℹ️  No existing models to back up."
 fi
@@ -63,12 +67,20 @@ if [ ! -f "$TARGET/lib/env.sh" ]; then
 fi
 
 # ------------------------------------------------------------
-# Restore models
+# Restore models — fast move back
 # ------------------------------------------------------------
-if [ -d "$BACKUP_DIR" ] && [ "$(ls -A "$BACKUP_DIR" 2>/dev/null || true)" != "" ]; then
-  echo "♻️  Restoring models..."
-  mkdir -p "$TARGET/$MODEL_DIR_REL"
-  cp -a "$BACKUP_DIR/." "$TARGET/$MODEL_DIR_REL/" 2>/dev/null || true
+if [ -d "$BACKUP_MODELS" ] && [ "$(ls -A "$BACKUP_MODELS" 2>/dev/null || true)" != "" ]; then
+  echo "♻️  Restoring models (fast)..."
+
+  # In case fresh install already created llm/models (empty)
+  rm -rf "$TARGET/$MODEL_DIR_REL"
+  mkdir -p "$(dirname "$TARGET/$MODEL_DIR_REL")"
+
+  mv "$BACKUP_MODELS" "$TARGET/$MODEL_DIR_REL"
+
+  # optional cleanup
+  rmdir "$BACKUP_ROOT" 2>/dev/null || true
+
   echo "✅ Models restored: $TARGET/$MODEL_DIR_REL"
 else
   echo "ℹ️  No model backup to restore."
