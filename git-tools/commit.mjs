@@ -83,8 +83,7 @@ function getStagedFiles() {
   const r = run('git', ['diff', '--cached', '--name-only', '-z'], {
     cwd: WORK_CWD,
   })
-  if (r.status !== 0)
-    die(`${EMOJI.err} failed to list staged files\n${r.stderr || r.stdout}`)
+  if (r.status !== 0) die(`${EMOJI.err} failed to list staged files\n${r.stderr || r.stdout}`)
   return (r.stdout || '').split('\0').filter(Boolean)
 }
 
@@ -95,7 +94,7 @@ function getStagedFiles() {
 function isForbiddenPath(p) {
   const forbidden = [
     /^\.env$/,
-    /^\.env\./,
+    /^\.env\.(?!example$|sample$)/,
     /\.pem$/i,
     /\.key$/i,
     /\.p12$/i,
@@ -130,9 +129,7 @@ async function prompt(question) {
     input: process.stdin,
     output: process.stdout,
   })
-  const ans = await new Promise((resolve) =>
-    rl.question(question, (value) => resolve(value)),
-  )
+  const ans = await new Promise((resolve) => rl.question(question, (value) => resolve(value)))
   rl.close()
   return String(ans ?? '').trim()
 }
@@ -180,9 +177,7 @@ async function handleForbiddenFiles() {
   const forbidden = staged.filter(isForbiddenPath)
   if (forbidden.length === 0) return
 
-  console.log(
-    `${EMOJI.warn} Forbidden staged files detected (should NOT be committed):`,
-  )
+  console.log(`${EMOJI.warn} Forbidden staged files detected (should NOT be committed):`)
   for (const f of forbidden) console.log(`  - ${f}`)
   console.log('')
   console.log('Choose action:')
@@ -201,8 +196,7 @@ async function handleForbiddenFiles() {
     let r = run('git', ['restore', '--staged', '--', f], { cwd: WORK_CWD })
     if (r.status !== 0) {
       r = run('git', ['reset', '-q', 'HEAD', '--', f], { cwd: WORK_CWD })
-      if (r.status !== 0)
-        die(`${EMOJI.err} failed to unstage: ${f}\n${r.stderr || r.stdout}`)
+      if (r.status !== 0) die(`${EMOJI.err} failed to unstage: ${f}\n${r.stderr || r.stdout}`)
     }
   }
 
@@ -221,9 +215,7 @@ async function handleForbiddenFiles() {
  */
 function extractCommitMessage(genOut) {
   const lines = String(genOut ?? '').split(/\r?\n/)
-  const start = lines.findIndex(
-    (l) => l.trim() === '===== COMMIT MESSAGE =====',
-  )
+  const start = lines.findIndex((l) => l.trim() === '===== COMMIT MESSAGE =====')
   if (start < 0) return ''
 
   let end = -1
@@ -249,19 +241,14 @@ function applyType(commitType, msg) {
   const lines = msg.split(/\r?\n/)
   const firstNonEmptyIdx = lines.findIndex((l) => l.trim().length > 0)
 
-  const subject0 =
-    firstNonEmptyIdx >= 0 ? (lines[firstNonEmptyIdx]?.trim() ?? '') : ''
-  const body =
-    firstNonEmptyIdx >= 0 ? lines.slice(firstNonEmptyIdx + 1).join('\n') : ''
+  const subject0 = firstNonEmptyIdx >= 0 ? (lines[firstNonEmptyIdx]?.trim() ?? '') : ''
+  const body = firstNonEmptyIdx >= 0 ? lines.slice(firstNonEmptyIdx + 1).join('\n') : ''
 
   const re = /^(feat|fix|refactor|chore|docs|test|perf)(\([^)]+\))?:\s+.+/
   let subject = subject0
 
   if (re.test(subject0)) {
-    subject = subject0.replace(
-      /^(feat|fix|refactor|chore|docs|test|perf)/,
-      commitType,
-    )
+    subject = subject0.replace(/^(feat|fix|refactor|chore|docs|test|perf)/, commitType)
   } else {
     subject = `${commitType}: ${subject0 || 'update'}`
   }
@@ -340,8 +327,7 @@ function normalizeBulletBody(fullMsg) {
  * @returns {CmdResult}
  */
 function runGenerator() {
-  if (!fs.existsSync(GEN_SCRIPT))
-    die(`${EMOJI.err} generator not found: ${GEN_SCRIPT}`)
+  if (!fs.existsSync(GEN_SCRIPT)) die(`${EMOJI.err} generator not found: ${GEN_SCRIPT}`)
 
   const env = {
     ...process.env,
@@ -398,8 +384,7 @@ async function main() {
   })
 
   if (!isGitRepo()) die(`${EMOJI.err} Not inside a git repository.`)
-  if (!hasStagedChanges())
-    die(`${EMOJI.err} No staged changes.\nTIP: git add -A`)
+  if (!hasStagedChanges()) die(`${EMOJI.err} No staged changes.\nTIP: git add -A`)
 
   const commitType = await selectCommitType()
   await handleForbiddenFiles()
